@@ -15,7 +15,11 @@ except ImportError:
     ColorConverter = None
     mpl = None
     plt = None
-from PIL import Image
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 
 def export(sequence, filename, rate=30, bitrate=None,
@@ -244,7 +248,8 @@ def scrollable_stack(sequence, width=512, normed=True):
 
 def _as_png(arr, width, normed=True):
     "Create a PNG image buffer from an array."
-    from PIL import Image
+    if Image is None:
+        raise ImportError('Module PIL/Pillow not found')
     w = width  # for brevity
     h = arr.shape[0] * w // arr.shape[1]
     if normed:
@@ -390,6 +395,8 @@ def plot_to_frame(fig, dpi, **imsave_kwargs):
     """
     if mpl is None:
         raise ImportError('Module matplotlib not found')
+    if Image is None:
+        raise ImportError('Module PIL/Pillow not found')
     from pims import Frame
     buffer = six.BytesIO()
     if isinstance(fig, mpl.axes.Axes):
@@ -418,6 +425,8 @@ def plots_to_frame(figures, width=512, close_fig=False, **imsave_kwargs):
     """
     if mpl is None:
         raise ImportError('Module matplotlib not found')
+    if Image is None:
+        raise ImportError('Module PIL/Pillow not found')
     from pims import Frame
     if 'dpi' in imsave_kwargs or 'format' in imsave_kwargs:
         raise ValueError('Do not specify dpi or format imsave kwargs.')
