@@ -34,3 +34,4 @@ before_install:
   - export PATH=/home/travis/mc/bin:$PATH
 
 script: nosetests --nologcapture
+
