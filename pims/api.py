@@ -54,17 +54,6 @@ except (ImportError, IOError):
     MoviePyReader = not_available("ImageIO")
 
 
-try:
-    import pims.moviepy_reader
-    if pims.moviepy_reader.available():
-        MoviePyReader = pims.moviepy_reader.MoviePyReader
-        if Video is None:
-            Video = MoviePyReader
-    else:
-        raise ImportError()
-except (ImportError, IOError):
-    MoviePyReader = not_available("MoviePy")
-
 if Video is None:
     Video = not_available("PyAV, MoviePy, or ImageIO")
 
