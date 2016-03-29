@@ -102,12 +102,12 @@ from pims.tiff_stack import (TiffStack_pil, TiffStack_libtiff,
 if pims.tiff_stack.tifffile_available():
     _fmt = PimsFormat(name='Tifffile',
                       description='Reads .tiff files via tifffile.py.',
-                      extensions=' '.join(TiffStack_tiffile.class_exts()),
+                      extensions=' '.join(TiffStack_tifffile.class_exts()),
                       modes='iv',
-                      pims_reader=TiffStack_tiffile)
+                      pims_reader=TiffStack_tifffile)
     formats.add_format(_fmt)
 else:
-    TiffStack_tiffile = not_available("tifffile")
+    TiffStack_tifffile = not_available("tifffile")
 if pims.tiff_stack.libtiff_available():
     _fmt = PimsFormat(name='Libtiff',
                       description='Reads .tiff files via libtiff',
