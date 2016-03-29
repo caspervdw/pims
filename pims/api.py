@@ -170,3 +170,49 @@ def _drop_dot(s):
         return s[1:]
     else:
         return s
+
+
+"""Register readers with ImageIO"""
+from imageio import formats
+from imageio.core import Format
+
+class PimsFormat(Format):
+    def __init__(self, *args, **kwargs):
+        self._pims_reader = kwargs.pop('pims_reader')
+        super(PimsFormat, self).__init__(*args, **kwargs)
+
+    def _can_read(self, request):
+        if request.mode[1] in (self.modes + '?'):
+            if request.filename.lower().endswith(self.extensions):
+                return True
+
+    def _can_write(self, request):
+        return False
+
+
+    class Reader(Format.Reader):
+        def _open(self, **kwargs):
+            self._filename = self.request.get_local_filename()
+            self._reader = self.format._pims_reader(self._filename, **kwargs)
+
+        def _close(self):
+            self._reader.close()
+
+        def _get_length(self):
+            return len(self._reader)
+
+        def _get_data(self, index):
+            frame = self._reader[index]
+            return frame, frame.metadata
+
+        def _get_meta_data(self, index):
+            if index is None:
+                return self._reader.metadata
+            return self._reader[index].metadata
+
+
+formats.add_format(PimsFormat('Bioformats',
+                   'Reads multidimensional images from filed supported by '
+                   'Bioformats.',
+                   ' '.join(Bioformats.class_exts()),
+                   'iIvV', pims_reader=Bioformats))
