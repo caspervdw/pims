@@ -13,11 +13,11 @@ import glob
 import os
 from warnings import warn
 
+from imageio import formats, get_reader
+from imageio.core import Format
+
 # has to be here for API stuff
 from pims.image_sequence import ImageSequence, ImageSequenceND  # noqa
-from .cine import Cine  # noqa
-from .norpix_reader import NorpixSeq  # noqa
-from pims.tiff_stack import TiffStack_tifffile  # noqa
 from .spe_stack import SpeStack
 
 
@@ -27,25 +27,104 @@ def not_available(requirement):
             "This reader requires {0}.".format(requirement))
     return raiser
 
+
+class PimsFormat(Format):
+    """Wrapper for registering readers with ImageIO"""
+    def __init__(self, *args, **kwargs):
+        self._pims_reader = kwargs.pop('pims_reader')
+        super(PimsFormat, self).__init__(*args, **kwargs)
+
+    def _can_read(self, request):
+        if request.mode[1] in (self.modes + '?'):
+            if request.filename.lower().endswith(self.extensions):
+                return True
+
+    def _can_write(self, request):
+        return False
+
+
+    class Reader(Format.Reader):
+        def _open(self, **kwargs):
+            self._filename = self.request.get_local_filename()
+            self._reader = self.format._pims_reader(self._filename, **kwargs)
+
+        def _close(self):
+            self._reader.close()
+
+        def _get_length(self):
+            return len(self._reader)
+
+        def _get_data(self, index):
+            frame = self._reader[index]
+            return frame, frame.metadata
+
+        def _get_meta_data(self, index):
+            if index is None:
+                return self._reader.metadata
+            return self._reader[index].metadata
+
+from .norpix_reader import NorpixSeq  # noqa
+_fmt = PimsFormat(name='Norpix',
+                  description='Read Norpix sequence (.seq) files',
+                  extensions=' '.join(NorpixSeq.class_exts()),
+                  modes='iv',
+                  pims_reader=NorpixSeq)
+formats.add_format(_fmt)
+
+from .cine import Cine  # noqa
+_fmt = PimsFormat(name='Cine',
+                  description='Read cine files',
+                  extensions=' '.join(Cine.class_exts()),
+                  modes='iv',
+                  pims_reader=Cine)
+formats.add_format(_fmt)
+
 try:
     import pims.pyav_reader
     if pims.pyav_reader.available():
         Video = pims.pyav_reader.PyAVVideoReader
     else:
         raise ImportError()
+    _fmt = PimsFormat(name='PyAV',
+                      description='Reads video files via PyAV.',
+                      extensions=' '.join(Video.class_exts()),
+                      modes='iI',
+                      pims_reader=Video)
+    formats.add_format(_fmt)
 except (ImportError, IOError):
     Video = not_available("PyAV and/or PIL/Pillow")
 
 import pims.tiff_stack
 from pims.tiff_stack import (TiffStack_pil, TiffStack_libtiff,
-                                TiffStack_tifffile)
+                             TiffStack_tifffile)
 # First, check if each individual class is available
 # and drop in placeholders as needed.
-if not pims.tiff_stack.tifffile_available():
+if pims.tiff_stack.tifffile_available():
+    _fmt = PimsFormat(name='Tifffile',
+                      description='Reads .tiff files via tifffile.py.',
+                      extensions=' '.join(TiffStack_tiffile.class_exts()),
+                      modes='iv',
+                      pims_reader=TiffStack_tiffile)
+    formats.add_format(_fmt)
+else:
     TiffStack_tiffile = not_available("tifffile")
-if not pims.tiff_stack.libtiff_available():
+if pims.tiff_stack.libtiff_available():
+    _fmt = PimsFormat(name='Libtiff',
+                      description='Reads .tiff files via libtiff',
+                      extensions=' '.join(TiffStack_libtiff.class_exts()),
+                      modes='iv',
+                      pims_reader=TiffStack_libtiff)
+    formats.add_format(_fmt)
+else:
     TiffStack_libtiff = not_available("libtiff")
-if not pims.tiff_stack.PIL_available():
+if pims.tiff_stack.PIL_available():
+    _fmt = PimsFormat(name='PIL',
+                      description='Reads .tiff files via PIL/Pillow',
+                      extensions=' '.join(TiffStack_pil.class_exts()),
+                      modes='iv',
+                      pims_reader=TiffStack_pil)
+    formats.add_format(_fmt)
+else:
     TiffStack_pil = not_available("PIL or Pillow")
 # Second, decide which class to assign to the
 # TiffStack alias.
@@ -65,13 +144,26 @@ try:
         Bioformats = pims.bioformats.BioformatsReader
     else:
         raise ImportError()
+    _fmt = PimsFormat(name='Bioformats',
+                      description='Reads multidimensional images from filed '
+                                  'supported by Bioformats.',
+                      extensions=' '.join(Bioformats.class_exts()),
+                      modes='iIvV',
+                      pims_reader=Bioformats)
+    formats.add_format(_fmt)
 except (ImportError, IOError):
-    BioformatsRaw = not_available("JPype")
     Bioformats = not_available("JPype")
 
 
 try:
     from pims_nd2 import ND2_Reader
+    _fmt = PimsFormat(name='ND2_Reader',
+                      description='Reads .nd2 images from NIS Elements images '
+                                  'via the Nikon SDK.',
+                      extensions=' '.join(ND2_Reader.class_exts()),
+                      modes='iIvV',
+                      pims_reader=ND2_Reader)
+    formats.add_format(_fmt)
 except ImportError:
     ND2_Reader = not_available("pims_nd2")
 
@@ -114,105 +206,47 @@ def open(sequence, **kwargs):
         #       delegate to subclasses as needed
         return ImageSequence(sequence, **kwargs)
 
-    _, ext = os.path.splitext(sequence)
-    if ext is None or len(ext) < 2:
-        raise UnknownFormatError(
-            "Could not detect your file type because it did not have an "
-            "extension. Try specifying a loader class, e.g. "
-            "Video({0})".format(sequence))
-    ext = ext.lower()[1:]
-
-    # list all readers derived from the pims baseclasses
-    all_handlers = chain(_recursive_subclasses(FramesSequence),
-                         _recursive_subclasses(FramesSequenceND))
-    # keep handlers that support the file ext. use set to avoid duplicates.
-    eligible_handlers = set(h for h in all_handlers
-                            if ext and ext in map(_drop_dot, h.class_exts()))
-    if len(eligible_handlers) < 1:
-        raise UnknownFormatError(
-            "Could not autodetect how to load a file of type {0}. "
-            "Try manually "
-            "specifying a loader class, e.g. Video({1})".format(ext, sequence))
-
-    def sort_on_priority(handlers):
-        # This uses optional priority information from subclasses
-        # > 10 means that it will be used instead of than built-in subclasses
-        def priority(cls):
-            try:
-                return cls.class_priority
-            except AttributeError:
-                return 10
-        return sorted(handlers, key=priority, reverse=True)
-
-    exceptions = ''
-    for handler in sort_on_priority(eligible_handlers):
-        try:
-            return handler(sequence, **kwargs)
-        except Exception as e:
-            message = '{0} errored: {1}'.format(str(handler), str(e))
-            warn(message)
-            exceptions += message + '\n'
-    raise UnknownFormatError("All handlers returned exceptions:\n" + exceptions)
+    # else: let ImageIO decide on the reader
+    return ImageIOReader(sequence, **kwargs)
 
 
-class UnknownFormatError(Exception):
-    pass
+class ImageIOReader(FramesSequence):
+    def __init__(self, filename, **kwargs):
+        self.reader = get_reader(filename, **kwargs)
+        self.filename = filename
+        self._len = self.reader.get_length()
 
+        first_frame = self.get_frame(0)
+        self._shape = first_frame.shape
+        self._dtype = first_frame.dtype
 
-def _recursive_subclasses(cls):
-    "Return all subclasses (and their subclasses, etc.)."
-    # Source: http://stackoverflow.com/a/3862957/1221924
-    return (cls.__subclasses__() +
-        [g for s in cls.__subclasses__() for g in _recursive_subclasses(s)])
+    def get_frame(self, i):
+        frame = self.reader.get_data(i)
+        return Frame(frame, frame_no=i, metadata=frame.meta)
 
-def _drop_dot(s):
-    if s.startswith('.'):
-        return s[1:]
-    else:
-        return s
+    def get_metadata(self):
+        return self.reader.get_meta_data(None)
 
+    def __len__(self):
+        return self._len
 
-"""Register readers with ImageIO"""
-from imageio import formats
-from imageio.core import Format
+    def __iter__(self):
+        iterable = self.reader.iter_data()
+        for i in range(len(self)):
+            frame = next(iterable)
+            yield Frame(frame, frame_no=i, metadata=frame.meta)
 
-class PimsFormat(Format):
-    def __init__(self, *args, **kwargs):
-        self._pims_reader = kwargs.pop('pims_reader')
-        super(PimsFormat, self).__init__(*args, **kwargs)
+    @property
+    def frame_rate(self):
+        return self.get_meta_data()['fps']
 
-    def _can_read(self, request):
-        if request.mode[1] in (self.modes + '?'):
-            if request.filename.lower().endswith(self.extensions):
-                return True
+    @property
+    def frame_shape(self):
+        return self._shape
 
-    def _can_write(self, request):
-        return False
+    @property
+    def pixel_type(self):
+        return self._dtype
 
-
-    class Reader(Format.Reader):
-        def _open(self, **kwargs):
-            self._filename = self.request.get_local_filename()
-            self._reader = self.format._pims_reader(self._filename, **kwargs)
-
-        def _close(self):
-            self._reader.close()
-
-        def _get_length(self):
-            return len(self._reader)
-
-        def _get_data(self, index):
-            frame = self._reader[index]
-            return frame, frame.metadata
-
-        def _get_meta_data(self, index):
-            if index is None:
-                return self._reader.metadata
-            return self._reader[index].metadata
-
-
-formats.add_format(PimsFormat('Bioformats',
-                   'Reads multidimensional images from filed supported by '
-                   'Bioformats.',
-                   ' '.join(Bioformats.class_exts()),
-                   'iIvV', pims_reader=Bioformats))
+    def close(self):
+        self.reader.close()
