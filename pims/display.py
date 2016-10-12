@@ -9,6 +9,7 @@ from io import BytesIO
 from base64 import b64encode
 from contextlib import contextmanager
 import warnings
+import os
 
 try:
     from matplotlib.colors import ColorConverter
@@ -30,6 +31,9 @@ try:
         from moviepy.editor import VideoClip
 except ImportError:
     VideoClip = None
+
+EXTENSIONS = {'.avi': 'libx264', '.mp4': 'mpeg4', '.mov': 'mpeg4',
+              '.wmv': 'wmv2'}
 
 
 def export_pyav(sequence, filename, rate=30, bitrate=None,
@@ -176,7 +180,7 @@ class CachedFrameGenerator(object):
 
 
 def export_moviepy(sequence, filename, rate=30, bitrate=None, width=None,
-                   height=None, codec='libx264', format='yuv420p',
+                   height=None, codec=None, format='yuv420p',
                    autoscale=True, quality=None, verbose=True,
                    ffmpeg_params=None, rate_range=(16, 32)):
     """Export a sequence of images as a standard video file using MoviePy.
@@ -228,6 +232,17 @@ def export_moviepy(sequence, filename, rate=30, bitrate=None, width=None,
     """
     if VideoClip is None:
         raise ImportError('The MoviePy exporter requires moviepy to work.')
+
+    if codec is None:
+        # guess codec from file extension
+        _, fileext = os.path.splitext(filename)
+        if fileext == '':
+            fileext = '.avi'
+            filename += '.avi'
+        try:
+            codec = EXTENSIONS[fileext]
+        except KeyError:
+            codec = 'libx264'
 
     if ffmpeg_params is None:
         ffmpeg_params = []
